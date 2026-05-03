@@ -497,24 +497,6 @@ class RLRFTrainer:
         self.model.save_pretrained(ckpt_dir)
         self.processor.save_pretrained(ckpt_dir)
         logger.info("Checkpoint saved to %s", ckpt_dir)
-        
-        # Cloud upload
-        if self.rlrf_cfg.push_to_hub and self.rlrf_cfg.hub_model_id:
-            try:
-                logger.info(f"Uploading checkpoint to Hugging Face Hub: {self.rlrf_cfg.hub_model_id}...")
-                self.model.push_to_hub(
-                    self.rlrf_cfg.hub_model_id, 
-                    token=self.rlrf_cfg.hub_token,
-                    commit_message=f"RLRF step {self.global_step}"
-                )
-                self.processor.push_to_hub(
-                    self.rlrf_cfg.hub_model_id,
-                    token=self.rlrf_cfg.hub_token,
-                    commit_message=f"RLRF step {self.global_step}"
-                )
-                logger.info("Successfully uploaded checkpoint to Hub!")
-            except Exception as e:
-                logger.warning(f"Failed to push to Hub: {e}")
 
     # ------------------------------------------------------------------
     # Helpers
