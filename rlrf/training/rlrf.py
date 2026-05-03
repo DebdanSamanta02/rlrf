@@ -526,23 +526,40 @@ def run_rlrf(
     ckpt = sft_checkpoint or cfg.sft.output_dir
     logger.info("Loading policy model from: %s", ckpt)
 
-    try:
-        # If ckpt is a PeftModel directory
+    import os
+    from ..model.vlm import load_model_and_processor
+
+    adapter_config_path = os.path.join(ckpt, "adapter_config.json")
+    if os.path.exists(ckpt) and os.path.exists(adapter_config_path):
+        from transformers import BitsAndBytesConfig
+        from peft import prepare_model_for_kbit_training
+        
         processor = AutoProcessor.from_pretrained(ckpt, trust_remote_code=True)
+        
+        # Load base model in 4-bit to prevent OOM
+        compute_dtype = torch.bfloat16 if cfg.model.bnb_4bit_compute_dtype == "bfloat16" else torch.float16
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=cfg.model.load_in_4bit,
+            bnb_4bit_compute_dtype=compute_dtype,
+            bnb_4bit_quant_type=cfg.model.bnb_4bit_quant_type,
+            bnb_4bit_use_double_quant=True,
+        ) if cfg.model.load_in_4bit else None
+        
         base = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             cfg.model.model_name,
-            torch_dtype=torch.bfloat16,
+            quantization_config=bnb_config,
+            torch_dtype=torch.bfloat16 if not cfg.model.load_in_4bit else None,
             device_map=cfg.device_map,
             trust_remote_code=True,
         )
-        model = PeftModel.from_pretrained(base, ckpt)
-        model = model.merge_and_unload()   # merge LoRA into base weights
-        # Re-apply fresh LoRA for RLRF fine-tuning
-        from peft import get_peft_model, LoraConfig
-        from ..model.vlm import load_model_and_processor
-        model, processor = load_model_and_processor(cfg.model, cfg.device_map)
-    except Exception:
-        # Fallback: load from scratch
+        
+        if cfg.model.load_in_4bit:
+            base = prepare_model_for_kbit_training(base, use_gradient_checkpointing=True)
+            
+        # Load SFT LoRA and make it trainable for RLRF
+        model = PeftModel.from_pretrained(base, ckpt, is_trainable=True)
+        model.print_trainable_parameters()
+    else:
         logger.warning("Could not load SFT checkpoint; starting from base model.")
         model, processor = load_model_and_processor(cfg.model, cfg.device_map)
 
