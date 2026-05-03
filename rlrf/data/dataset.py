@@ -306,7 +306,6 @@ def load_hf_dataset(
         dataset_name,
         split=split,
         cache_dir=cache_dir,
-        trust_remote_code=True,
     )
 
     if max_samples is not None:
