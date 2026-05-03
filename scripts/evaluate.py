@@ -128,13 +128,13 @@ def main():
     from PIL import Image as PILImage
 
     for i, rec in enumerate(curated):
-        img   = rec["image"]
         gt_svg = rec["svg"]
-        if isinstance(img, np.ndarray):
-            img = PILImage.fromarray(img)
 
-        ref_arr = np.array(img.convert("RGB").resize(
-            (args.render_size, args.render_size)))
+        # Render ground-truth SVG to get reference image
+        ref_arr = renderer.render(gt_svg)
+        
+        # Multimodal generation needs a PIL Image
+        img = PILImage.fromarray(ref_arr)
 
         # Best-of-N inference (App. C.3): pick candidate with lowest MSE
         candidates = generate_svg(

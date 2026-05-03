@@ -7,15 +7,20 @@ Public dataset used:
     starvector/svg-stack  (HuggingFace, no auth token required)
     URL: https://huggingface.co/datasets/starvector/svg-stack
 
-Each record in the dataset contains:
-    • "image": raster PNG/JPEG image (PIL Image).
-    • "svg":   ground-truth SVG code string.
+Actual schema of starvector/svg-stack (confirmed from HF viewer):
+    • "Filename": str — e.g. "312f68f...db.svg"  (capital F)
+    • "Svg":      str — raw SVG XML code          (capital S)
+
+There is NO pre-rendered image column. We obtain the reference image by
+rendering the ground-truth SVG with CairoSVG. This is consistent with the
+paper: the same renderer (CairoSVG) is used for both GT and predicted SVGs,
+so the reward measures how faithfully the model reproduces the GT rendering.
 
 The module provides:
     • SVGDataset  — PyTorch Dataset wrapping the HF dataset.
-    • build_sft_dataset()  — prepare tokenized data for SFTTrainer.
+    • build_sft_dataset()  — prepare tokenised data for SFTTrainer.
     • build_rlrf_dataset() — prepare prompt data for GRPO training.
-    • collate_fn()         — custom collator for mixed image+text batches.
+    • collate_fn_rlrf()    — custom collator for mixed image+text batches.
 """
 
 from __future__ import annotations
@@ -28,6 +33,13 @@ import numpy as np
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
+
+# Lazy import — only needed when rendering GT SVGs
+try:
+    import cairosvg as _cairosvg
+    _CAIROSVG_OK = True
+except ImportError:
+    _CAIROSVG_OK = False
 
 logger = logging.getLogger(__name__)
 
@@ -104,10 +116,16 @@ class SVGDataset(Dataset):
         return len(self.records)
 
     def __getitem__(self, idx: int) -> dict:
-        rec = self.records[idx]
-        image  = self._load_image(rec["image"])
+        rec    = self.records[idx]
         svg    = rec.get("svg", "")
         gt_len = rec.get("_svg_length", len(svg))
+
+        # Render the ground-truth SVG to get the reference image.
+        # starvector/svg-stack has no pre-rendered image column, so we
+        # produce the reference image with the same CairoSVG renderer
+        # used for predicted SVGs.  This is consistent with the paper:
+        # reward = similarity(render(gt_svg), render(pred_svg)).
+        image = self._render_gt_svg(svg)
 
         messages = make_im2svg_messages(image)
 
@@ -120,8 +138,40 @@ class SVGDataset(Dataset):
     # Internal encoding helpers
     # ------------------------------------------------------------------
 
+    def _render_gt_svg(self, svg: str) -> Image.Image:
+        """Render the ground-truth SVG string → PIL Image (RGB).
+
+        This is used instead of loading a pre-rendered image because
+        starvector/svg-stack only provides raw SVG code (no image column).
+
+        Falls back to a white image if CairoSVG is not installed or
+        rendering fails, so the dataset never raises an unrecoverable error.
+        """
+        import io
+        size = self.render_size
+
+        if not svg or not _CAIROSVG_OK:
+            # White fallback — cairosvg not installed yet
+            return Image.new("RGB", (size, size), (255, 255, 255))
+
+        # Strip markdown fences the dataset sometimes includes
+        import re
+        svg = re.sub(r"```(?:svg|xml)?\s*\n?", "", svg, flags=re.IGNORECASE)
+        svg = re.sub(r"```", "", svg).strip()
+
+        try:
+            png = _cairosvg.svg2png(
+                bytestring=svg.encode("utf-8"),
+                output_width=size,
+                output_height=size,
+            )
+            return Image.open(io.BytesIO(png)).convert("RGB")
+        except Exception:
+            return Image.new("RGB", (size, size), (255, 255, 255))
+
+    # kept for backwards compatibility if image-bearing datasets are used
     def _load_image(self, image: Any) -> Image.Image:
-        """Ensure we have a PIL Image resized to render_size."""
+        """Load a PIL Image from a dataset field (numpy or PIL)."""
         if isinstance(image, np.ndarray):
             image = Image.fromarray(image)
         if not isinstance(image, Image.Image):
@@ -262,15 +312,32 @@ def load_hf_dataset(
     if max_samples is not None:
         ds = ds.select(range(min(max_samples, len(ds))))
 
-    # Normalise field names: some versions use 'svg_code' or 'code'
+    # ── Field normalisation ───────────────────────────────────────────────
+    # starvector/svg-stack uses capital-letter field names: "Svg", "Filename".
+    # We also fall back to lowercase variants for future compatibility.
     records = []
     for row in ds:
-        svg = row.get("svg") or row.get("svg_code") or row.get("code") or ""
-        img = row.get("image") or row.get("img")
-        if svg and img:
-            records.append({"image": img, "svg": svg})
+        svg = (
+            row.get("Svg")       # starvector/svg-stack (capital S)
+            or row.get("svg")
+            or row.get("svg_code")
+            or row.get("code")
+            or ""
+        )
+        filename = (
+            row.get("Filename")  # starvector/svg-stack (capital F)
+            or row.get("filename")
+            or ""
+        )
+        # No image column — reference image is rendered from GT SVG at load time.
+        # We store the raw SVG; rendering happens in SVGDataset.__getitem__.
+        if svg:
+            records.append({"svg": svg, "filename": filename})
 
-    logger.info("Loaded %d records from %s.", len(records), dataset_name)
+    logger.info(
+        "Loaded %d records from %s (fields: Svg+Filename, no pre-rendered image).",
+        len(records), dataset_name,
+    )
     return records
 
 

@@ -200,9 +200,9 @@ print(f"Train: {len(train_r)}, Eval: {len(eval_r)}")
 # Sanity check: display one sample
 sample = train_r[0]
 print(f"\nSample SVG length: {len(sample['svg'])} chars")
-if isinstance(sample['image'], Image.Image):
-    sample['image'].resize((128, 128)).save("/kaggle/working/sample_ref.png")
-    print("Reference image saved to /kaggle/working/sample_ref.png")
+print(f"Sample filename: {sample.get('filename', 'N/A')}")
+# (Note: starvector/svg-stack has no pre-rendered images.
+# SVGDataset renders them on-the-fly using CairoSVG.)
 
 
 # ============================================================================

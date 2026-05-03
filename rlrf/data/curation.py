@@ -130,7 +130,7 @@ def curate_dataset(
     min_entropy: float = 4.0,
     max_samples: Optional[int] = None,
     tokenizer: Optional[Callable] = None,
-    skip_entropy: bool = False,
+    skip_entropy: bool = True,   # True by default: svg-stack has no image column
 ) -> list[dict]:
     """Run the full curation pipeline: length filter → entropy filter → cap.
 
