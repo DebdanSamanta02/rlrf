@@ -334,7 +334,10 @@ class RLRFTrainer:
                 group_rewards: list[float] = []
                 group_ids: list[torch.Tensor] = []
 
-                for _ in range(rlrf.G):
+                for g_idx in range(rlrf.G):
+                    logger.info("  [Step %d] Generating rollout %d/%d for image %d/%d...", 
+                                self.global_step + 1, g_idx + 1, rlrf.G, b + 1, B)
+                    
                     # Build single-item inputs
                     gen_kwargs: dict = dict(
                         input_ids=input_ids[b : b + 1],
