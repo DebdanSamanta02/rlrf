@@ -394,7 +394,7 @@ def collate_fn_rlrf(batch: list[dict]) -> dict:
     if "pixel_values" in batch[0]:
         result["pixel_values"] = torch.cat([b["pixel_values"] for b in batch], dim=0)
     if "image_grid_thw" in batch[0]:
-        result["image_grid_thw"] = torch.cat([b["image_grid_thw"] for b in batch], dim=0)
+        result["image_grid_thw"] = torch.stack([b["image_grid_thw"] for b in batch])
 
     # Non-tensor fields
     result["ref_image"] = [b["ref_image"] for b in batch]
