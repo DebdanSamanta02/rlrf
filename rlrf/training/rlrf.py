@@ -380,8 +380,10 @@ class RLRFTrainer:
 
         # ── Compute GRPO loss ─────────────────────────────────────────────
         self.model.train()
-        total_loss = torch.tensor(0.0, device=self.device, requires_grad=True)
-        n_pairs    = 0
+        
+        # Count valid pairs to scale the loss correctly
+        n_pairs = sum(1 for gen_ids in all_gen_ids if gen_ids.numel() > 0)
+        total_loss_val = 0.0
 
         for idx, (gen_ids, adv_val) in enumerate(
             zip(all_gen_ids, all_advantages)
@@ -418,15 +420,14 @@ class RLRFTrainer:
             adv_tensor = torch.full_like(lp_new, adv_val)
 
             loss_i = grpo_loss(lp_new, lp_old, adv_tensor, rlrf.epsilon)
-            total_loss = total_loss + loss_i
-            n_pairs   += 1
+            
+            # Backpropagate immediately to free the computational graph and save VRAM
+            scaled_loss = loss_i / n_pairs / self.rlrf_cfg.gradient_accumulation_steps
+            scaled_loss.backward()
+            
+            total_loss_val += float(loss_i.item()) / n_pairs
 
-        if n_pairs > 0:
-            total_loss = total_loss / n_pairs
-            # Scale by gradient accumulation
-            (total_loss / self.rlrf_cfg.gradient_accumulation_steps).backward()
-
-        return float(total_loss.item()), all_rewards
+        return total_loss_val, all_rewards
 
     # ------------------------------------------------------------------
     # Evaluation
