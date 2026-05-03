@@ -82,6 +82,7 @@ def compute_sequence_log_probs(
     attention_mask: torch.Tensor,
     generated_ids: torch.Tensor,
     is_reference: bool = False,
+    **kwargs,
 ) -> torch.Tensor:
     """Compute per-token log probabilities for a generated sequence.
 
@@ -103,7 +104,7 @@ def compute_sequence_log_probs(
 
     ctx = torch.no_grad() if is_reference else contextlib.nullcontext()
     with ctx:
-        outputs = model(input_ids=full_ids, attention_mask=full_mask)
+        outputs = model(input_ids=full_ids, attention_mask=full_mask, **kwargs)
         logits  = outputs.logits  # [B, L_prompt+L_gen, V]
 
     # We only want the logits that predict the generated tokens:
@@ -306,9 +307,8 @@ class RLRFTrainer:
 
         input_ids     = batch["input_ids"].to(self.device)
         attention_mask = batch["attention_mask"].to(self.device)
-        pixel_values  = batch.get("pixel_values")
-        if pixel_values is not None:
-            pixel_values = pixel_values.to(self.device)
+        pixel_values_list = batch.get("pixel_values")
+        image_grid_thw_list = batch.get("image_grid_thw")
         ref_images    = batch["ref_image"]      # list[np.ndarray]
         gt_svgs       = batch["gt_svg"]         # list[str]
         gt_lengths    = batch["gt_length"]      # list[int]
@@ -346,8 +346,10 @@ class RLRFTrainer:
                         pad_token_id=self.processor.tokenizer.pad_token_id,
                         eos_token_id=self.processor.tokenizer.eos_token_id,
                     )
-                    if pixel_values is not None:
-                        gen_kwargs["pixel_values"] = pixel_values[b : b + 1]
+                    if pixel_values_list is not None:
+                        gen_kwargs["pixel_values"] = pixel_values_list[b].to(self.device)
+                    if image_grid_thw_list is not None:
+                        gen_kwargs["image_grid_thw"] = image_grid_thw_list[b].unsqueeze(0).to(self.device)
 
                     output_ids = self.model.generate(**gen_kwargs)
 
@@ -392,11 +394,17 @@ class RLRFTrainer:
             gen_ids_2d = gen_ids.unsqueeze(0).to(self.device)   # [1, L_gen]
             inp_2d     = input_ids[b_idx : b_idx + 1]
             mask_2d    = attention_mask[b_idx : b_idx + 1]
+            
+            vision_kwargs = {}
+            if pixel_values_list is not None:
+                vision_kwargs["pixel_values"] = pixel_values_list[b_idx].to(self.device)
+            if image_grid_thw_list is not None:
+                vision_kwargs["image_grid_thw"] = image_grid_thw_list[b_idx].unsqueeze(0).to(self.device)
 
             # Current policy log probs
             lp_new = compute_sequence_log_probs(
                 self.model, inp_2d, mask_2d, gen_ids_2d,
-                is_reference=False
+                is_reference=False, **vision_kwargs
             ).squeeze(0)  # [L_gen]
 
             # Old policy log probs (computed without gradient at generation time;
@@ -404,7 +412,7 @@ class RLRFTrainer:
             with torch.no_grad():
                 lp_old = compute_sequence_log_probs(
                     self.model, inp_2d, mask_2d, gen_ids_2d,
-                    is_reference=True
+                    is_reference=True, **vision_kwargs
                 ).squeeze(0).detach()
 
             adv_tensor = torch.full_like(lp_new, adv_val)
@@ -440,9 +448,6 @@ class RLRFTrainer:
                     break
                 input_ids     = batch["input_ids"].to(self.device)
                 attention_mask = batch["attention_mask"].to(self.device)
-                pixel_values  = batch.get("pixel_values")
-                if pixel_values is not None:
-                    pixel_values = pixel_values.to(self.device)
                 ref_image  = batch["ref_image"][0]
                 gt_length  = int(batch["gt_length"][0])
 
@@ -454,8 +459,10 @@ class RLRFTrainer:
                     pad_token_id=self.processor.tokenizer.pad_token_id,
                     eos_token_id=self.processor.tokenizer.eos_token_id,
                 )
-                if pixel_values is not None:
-                    gen_kwargs["pixel_values"] = pixel_values
+                if "pixel_values" in batch:
+                    gen_kwargs["pixel_values"] = batch["pixel_values"][0].to(self.device)
+                if "image_grid_thw" in batch:
+                    gen_kwargs["image_grid_thw"] = batch["image_grid_thw"][0].unsqueeze(0).to(self.device)
 
                 output_ids = self.model.generate(**gen_kwargs)
                 gen_text   = self.processor.tokenizer.decode(

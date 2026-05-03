@@ -390,11 +390,11 @@ def collate_fn_rlrf(batch: list[dict]) -> dict:
         ])
         result[key] = padded
 
-    # pixel_values may be 3-D or 4-D depending on processor version
+    # Keep as lists of tensors so we can easily index them per-image in RLRF loop
     if "pixel_values" in batch[0]:
-        result["pixel_values"] = torch.cat([b["pixel_values"] for b in batch], dim=0)
+        result["pixel_values"] = [b["pixel_values"] for b in batch]
     if "image_grid_thw" in batch[0]:
-        result["image_grid_thw"] = torch.stack([b["image_grid_thw"] for b in batch])
+        result["image_grid_thw"] = [b["image_grid_thw"] for b in batch]
 
     # Non-tensor fields
     result["ref_image"] = [b["ref_image"] for b in batch]
