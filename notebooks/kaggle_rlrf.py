@@ -294,25 +294,55 @@ print("RLRF checkpoint will be saved to:", cfg.rlrf.output_dir)
 # CELL 7 — Visualise reward components during training
 # ============================================================================
 
-def plot_training_curves(log_file: str = None):
-    """Plot reward curve from training log (if wandb/logging was enabled)."""
-    # Stub: replace with actual logged values
-    steps   = list(range(0, 100, 5))
-    rewards = [float(np.random.uniform(0.2, 0.8)) for _ in steps]  # placeholder
+def plot_training_curves(log_text: str = None):
+    """Plot reward and loss curves by parsing the Kaggle cell output text."""
+    import re
+    import matplotlib.pyplot as plt
 
-    plt.figure(figsize=(10, 4))
-    plt.plot(steps, rewards, marker="o", label="Mean Reward")
-    plt.axhline(0, color="gray", linestyle="--", alpha=0.5)
-    plt.xlabel("RLRF Step")
-    plt.ylabel("Composite Reward")
-    plt.title("RLRF Training Reward Curve")
-    plt.legend()
-    plt.tight_layout()
+    if not log_text or not log_text.strip() or "PASTE YOUR KAGGLE" in log_text:
+        print("Please paste the Kaggle cell logs into the `raw_logs` variable!")
+        return
+
+    steps, rewards, losses = [], [], []
+    
+    # Regex to match: Step   1 | loss=0.1234 | reward=0.5678
+    pattern = r"Step\s+(\d+)\s*\|\s*loss=([\d\.\-]+)\s*\|\s*reward=([\d\.\-]+)"
+    for line in log_text.split('\n'):
+        match = re.search(pattern, line)
+        if match:
+            steps.append(int(match.group(1)))
+            losses.append(float(match.group(2)))
+            rewards.append(float(match.group(3)))
+
+    if not steps:
+        print("No valid log lines found in the text.")
+        return
+
+    fig, ax1 = plt.subplots(figsize=(10, 4))
+
+    color = 'tab:blue'
+    ax1.set_xlabel("RLRF Step")
+    ax1.set_ylabel("Composite Reward", color=color)
+    ax1.plot(steps, rewards, marker="o", color=color, label="Mean Reward")
+    ax1.tick_params(axis='y', labelcolor=color)
+
+    ax2 = ax1.twinx()
+    color = 'tab:red'
+    ax2.set_ylabel('Loss', color=color)
+    ax2.plot(steps, losses, marker="x", color=color, label="Loss")
+    ax2.tick_params(axis='y', labelcolor=color)
+
+    plt.title("RLRF Training Curves")
+    fig.tight_layout()
     plt.savefig("/kaggle/working/reward_curve.png", dpi=150)
     plt.show()
-    print("Saved reward_curve.png")
+    print(f"Saved reward_curve.png with {len(steps)} data points.")
 
-plot_training_curves()
+raw_logs = """
+PASTE YOUR KAGGLE CELL OUTPUT HERE (Example: Step 1 | loss=... | reward=...)
+"""
+
+# plot_training_curves(raw_logs)
 
 
 # ============================================================================
