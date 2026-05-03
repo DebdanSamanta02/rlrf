@@ -248,46 +248,52 @@ class RLRFTrainer:
         accum_steps = 0
         reward_history: list[float] = []
 
-        for batch in self._cycle(loader):
-            if self.global_step >= rlrf.max_steps:
-                break
+        try:
+            for batch in self._cycle(loader):
+                if self.global_step >= rlrf.max_steps:
+                    break
 
-            step_loss, step_rewards = self._train_step(batch)
-            accum_loss  += step_loss
-            accum_steps += 1
-            reward_history.extend(step_rewards)
+                step_loss, step_rewards = self._train_step(batch)
+                accum_loss  += step_loss
+                accum_steps += 1
+                reward_history.extend(step_rewards)
 
-            # Gradient accumulation
-            if accum_steps % rlrf.gradient_accumulation_steps == 0:
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), rlrf.max_grad_norm
-                )
-                self.optimizer.step()
-                self.scheduler.step()
-                self.optimizer.zero_grad()
-
-                avg_loss   = accum_loss / rlrf.gradient_accumulation_steps
-                avg_reward = float(np.mean(reward_history[-rlrf.G * 10:])) \
-                             if reward_history else 0.0
-                accum_loss = 0.0
-
-                self.global_step += 1
-
-                if self.global_step % rlrf.logging_steps == 0:
-                    lr = self.scheduler.get_last_lr()[0]
-                    logger.info(
-                        "Step %4d | loss=%.4f | reward=%.4f | lr=%.2e",
-                        self.global_step, avg_loss, avg_reward, lr,
+                # Gradient accumulation
+                if accum_steps % rlrf.gradient_accumulation_steps == 0:
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(), rlrf.max_grad_norm
                     )
+                    self.optimizer.step()
+                    self.scheduler.step()
+                    self.optimizer.zero_grad()
 
-                if (
-                    eval_dataset is not None
-                    and self.global_step % rlrf.eval_steps == 0
-                ):
-                    self._evaluate(eval_dataset)
+                    avg_loss   = accum_loss / rlrf.gradient_accumulation_steps
+                    avg_reward = float(np.mean(reward_history[-rlrf.G * 10:])) \
+                                 if reward_history else 0.0
+                    accum_loss = 0.0
 
-                if self.global_step % rlrf.save_steps == 0:
-                    self._save(rlrf.output_dir)
+                    self.global_step += 1
+
+                    if self.global_step % rlrf.logging_steps == 0:
+                        lr = self.scheduler.get_last_lr()[0]
+                        logger.info(
+                            "Step %4d | loss=%.4f | reward=%.4f | lr=%.2e",
+                            self.global_step, avg_loss, avg_reward, lr,
+                        )
+
+                    if (
+                        eval_dataset is not None
+                        and self.global_step % rlrf.eval_steps == 0
+                    ):
+                        self._evaluate(eval_dataset)
+
+                    if self.global_step % rlrf.save_steps == 0:
+                        self._save(rlrf.output_dir)
+
+        except KeyboardInterrupt:
+            logger.warning("Training interrupted by user! Saving current progress...")
+            self._save(rlrf.output_dir)
+            raise
 
         # Final save
         self._save(rlrf.output_dir)
