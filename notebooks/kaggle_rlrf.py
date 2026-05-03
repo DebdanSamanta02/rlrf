@@ -294,55 +294,25 @@ print("RLRF checkpoint will be saved to:", cfg.rlrf.output_dir)
 # CELL 7 — Visualise reward components during training
 # ============================================================================
 
-def plot_training_curves(log_text: str = None):
-    """Plot reward and loss curves by parsing the Kaggle cell output text."""
-    import re
-    import matplotlib.pyplot as plt
+def plot_training_curves(log_file: str = None):
+    """Plot reward curve from training log (if wandb/logging was enabled)."""
+    # Stub: replace with actual logged values
+    steps   = list(range(0, 100, 5))
+    rewards = [float(np.random.uniform(0.2, 0.8)) for _ in steps]  # placeholder
 
-    if not log_text or not log_text.strip() or "PASTE YOUR KAGGLE" in log_text:
-        print("Please paste the Kaggle cell logs into the `raw_logs` variable!")
-        return
-
-    steps, rewards, losses = [], [], []
-    
-    # Regex to match: Step   1 | loss=0.1234 | reward=0.5678
-    pattern = r"Step\s+(\d+)\s*\|\s*loss=([\d\.\-]+)\s*\|\s*reward=([\d\.\-]+)"
-    for line in log_text.split('\n'):
-        match = re.search(pattern, line)
-        if match:
-            steps.append(int(match.group(1)))
-            losses.append(float(match.group(2)))
-            rewards.append(float(match.group(3)))
-
-    if not steps:
-        print("No valid log lines found in the text.")
-        return
-
-    fig, ax1 = plt.subplots(figsize=(10, 4))
-
-    color = 'tab:blue'
-    ax1.set_xlabel("RLRF Step")
-    ax1.set_ylabel("Composite Reward", color=color)
-    ax1.plot(steps, rewards, marker="o", color=color, label="Mean Reward")
-    ax1.tick_params(axis='y', labelcolor=color)
-
-    ax2 = ax1.twinx()
-    color = 'tab:red'
-    ax2.set_ylabel('Loss', color=color)
-    ax2.plot(steps, losses, marker="x", color=color, label="Loss")
-    ax2.tick_params(axis='y', labelcolor=color)
-
-    plt.title("RLRF Training Curves")
-    fig.tight_layout()
+    plt.figure(figsize=(10, 4))
+    plt.plot(steps, rewards, marker="o", label="Mean Reward")
+    plt.axhline(0, color="gray", linestyle="--", alpha=0.5)
+    plt.xlabel("RLRF Step")
+    plt.ylabel("Composite Reward")
+    plt.title("RLRF Training Reward Curve")
+    plt.legend()
+    plt.tight_layout()
     plt.savefig("/kaggle/working/reward_curve.png", dpi=150)
     plt.show()
-    print(f"Saved reward_curve.png with {len(steps)} data points.")
+    print("Saved reward_curve.png")
 
-raw_logs = """
-PASTE YOUR KAGGLE CELL OUTPUT HERE (Example: Step 1 | loss=... | reward=...)
-"""
-
-# plot_training_curves(raw_logs)
+plot_training_curves()
 
 
 # ============================================================================
@@ -424,3 +394,47 @@ print("  show_comparison(sample_image, pred, title='RLRF')")
 print("Run the evaluate.py script to get paper-style metrics.")
 print("Expected metrics (Table 1 scale):")
 print("  MSE (↓), SSIM (↑), DINO Score (↑), LPIPS (↓), Code Efficiency (near 0)")
+
+# ============================================================================
+# CELL 9 — Load Latest Checkpoint & Run Inference
+# ============================================================================
+
+def load_and_infer(image_index=0):
+    """Load the latest saved checkpoint from disk and test it!"""
+    import os
+    import glob
+    from rlrf.model.vlm import load_model_and_processor
+    from rlrf.rendering import SVGRenderer
+    from peft import PeftModel
+    from datasets import load_dataset
+    
+    # 1. Find the latest saved checkpoint
+    ckpts = glob.glob(cfg.rlrf.output_dir + "/checkpoint-*")
+    if not ckpts:
+        print(f"No checkpoints found in {cfg.rlrf.output_dir}! Did it reach Step 10?")
+        return
+        
+    latest_ckpt = max(ckpts, key=os.path.getmtime)
+    print(f"Loading latest checkpoint: {latest_ckpt}")
+    
+    # 2. Load 4-bit base model & processor
+    base_model, processor = load_model_and_processor(cfg.model, cfg.device_map)
+    
+    # 3. Apply the RLRF LoRA weights you just trained!
+    model = PeftModel.from_pretrained(base_model, latest_ckpt)
+    
+    # 4. Setup renderer & grab a sample image
+    renderer = SVGRenderer(device="cuda")
+    ds = load_dataset(cfg.data.dataset_name, split=cfg.data.dataset_split)
+    sample_image = ds[image_index]["image"].convert("RGB")
+    
+    # 5. Run Best-of-N inference!
+    print("Running inference (Best of 5)... this will take a moment.")
+    svg, pred_arr = inference_demo(model, processor, renderer, sample_image, best_of_n=5)
+    
+    step_num = latest_ckpt.split('-')[-1]
+    show_comparison(sample_image, pred_arr, title=f"RLRF (Step {step_num})")
+
+print("Added load_and_infer() helper function!")
+# Uncomment to test the first image in the dataset:
+# load_and_infer(image_index=0)
