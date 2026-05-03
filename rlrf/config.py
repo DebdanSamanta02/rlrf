@@ -145,7 +145,7 @@ class RLRFConfig:
     best_of_n: int = 5
 
     # ── Training schedule (paper §4.1) ───────────────────────────────────────
-    max_steps: int = 500               # paper: 500 for main experiments
+    max_steps: int = 70                # 3-hour limit on Kaggle
     learning_rate: float = 1e-5        # paper: 1e-5
 
     # LR decay: 70% every 100 steps (paper §4.1)
@@ -153,7 +153,7 @@ class RLRFConfig:
     lr_decay_steps: int = 100
 
     per_device_train_batch_size: int = 1
-    gradient_accumulation_steps: int = 4
+    gradient_accumulation_steps: int = 1   # Update weights after every image (faster steps)
     max_grad_norm: float = 1.0
     bf16: bool = True
     fp16: bool = False
@@ -167,9 +167,9 @@ class RLRFConfig:
     max_new_tokens: int = 1024   # reduce for Kaggle memory
 
     # ── Logging & saving ─────────────────────────────────────────────────────
-    logging_steps: int = 5
-    save_steps: int = 50
-    eval_steps: int = 50
+    logging_steps: int = 1
+    save_steps: int = 10
+    eval_steps: int = 10
     save_total_limit: int = 2
     report_to: str = "none"
 
