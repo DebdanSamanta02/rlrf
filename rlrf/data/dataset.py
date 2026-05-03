@@ -392,7 +392,9 @@ def collate_fn_rlrf(batch: list[dict]) -> dict:
 
     # pixel_values may be 3-D or 4-D depending on processor version
     if "pixel_values" in batch[0]:
-        result["pixel_values"] = torch.stack([b["pixel_values"] for b in batch])
+        result["pixel_values"] = torch.cat([b["pixel_values"] for b in batch], dim=0)
+    if "image_grid_thw" in batch[0]:
+        result["image_grid_thw"] = torch.cat([b["image_grid_thw"] for b in batch], dim=0)
 
     # Non-tensor fields
     result["ref_image"] = [b["ref_image"] for b in batch]

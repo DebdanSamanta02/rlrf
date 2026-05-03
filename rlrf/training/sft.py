@@ -70,7 +70,9 @@ class SVGDataCollator:
             ])
 
         if "pixel_values" in batch[0]:
-            out["pixel_values"] = torch.stack([b["pixel_values"] for b in batch])
+            out["pixel_values"] = torch.cat([b["pixel_values"] for b in batch], dim=0)
+        if "image_grid_thw" in batch[0]:
+            out["image_grid_thw"] = torch.cat([b["image_grid_thw"] for b in batch], dim=0)
 
         return out
 
