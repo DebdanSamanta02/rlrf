@@ -409,7 +409,7 @@ def load_and_infer(image_index=0):
     from datasets import load_dataset
     
     # 1. Find the latest saved checkpoint
-    ckpts = glob.glob(cfg.rlrf.output_dir + "/checkpoint-*")
+    ckpts = glob.glob(cfg.rlrf.output_dir + "/step_*")
     if not ckpts:
         print(f"No checkpoints found in {cfg.rlrf.output_dir}! Did it reach Step 10?")
         return
@@ -432,7 +432,7 @@ def load_and_infer(image_index=0):
     print("Running inference (Best of 5)... this will take a moment.")
     svg, pred_arr = inference_demo(model, processor, renderer, sample_image, best_of_n=5)
     
-    step_num = latest_ckpt.split('-')[-1]
+    step_num = latest_ckpt.split('_')[-1]
     show_comparison(sample_image, pred_arr, title=f"RLRF (Step {step_num})")
 
 print("Added load_and_infer() helper function!")
