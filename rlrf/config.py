@@ -106,8 +106,11 @@ class SFTConfig:
     save_total_limit: int = 2
     dataloader_num_workers: int = 2
     report_to: str = "none"             # set "wandb" for experiment tracking
-
-
+    
+    # ── Cloud Saving ─────────────────────────────────────────────────────────
+    push_to_hub: bool = False
+    hub_model_id: str = ""              # e.g., "username/svg-sft"
+    hub_token: str = ""                 # HF API token
 # ---------------------------------------------------------------------------
 # RLRF (Stage 2) configuration
 # ---------------------------------------------------------------------------
@@ -173,6 +176,10 @@ class RLRFConfig:
     save_total_limit: int = 2
     report_to: str = "none"
 
+    # ── Cloud Saving ─────────────────────────────────────────────────────────
+    push_to_hub: bool = False
+    hub_model_id: str = ""              # e.g., "username/svg-rlrf"
+    hub_token: str = ""                 # HF API token
 
 # ---------------------------------------------------------------------------
 # Reward configuration

@@ -146,6 +146,11 @@ def run_sft(cfg: Config, resume_from: Optional[str] = None) -> None:
         label_names=["labels"],
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
+        
+        # Cloud Saving
+        push_to_hub=sft.push_to_hub,
+        hub_model_id=sft.hub_model_id if sft.push_to_hub else None,
+        hub_token=sft.hub_token if sft.push_to_hub else None,
     )
 
     # ── Trainer ───────────────────────────────────────────────────────────
