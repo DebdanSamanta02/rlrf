@@ -424,7 +424,7 @@ def load_and_infer(image_index=0):
     model = PeftModel.from_pretrained(base_model, latest_ckpt)
     
     # 4. Setup renderer & grab a sample image
-    renderer = SVGRenderer(device="cuda")
+    renderer = SVGRenderer()
     ds = load_dataset(cfg.data.dataset_name, split=cfg.data.dataset_split)
     sample_image = ds[image_index]["image"].convert("RGB")
     
