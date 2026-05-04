@@ -145,7 +145,7 @@ class RLRFConfig:
     best_of_n: int = 5
 
     # ── Training schedule (paper §4.1) ───────────────────────────────────────
-    max_steps: int = 70                # 3-hour limit on Kaggle
+    max_steps: int = 10                # 3-hour limit on Kaggle
     learning_rate: float = 1e-5        # paper: 1e-5
 
     # LR decay: 70% every 100 steps (paper §4.1)
