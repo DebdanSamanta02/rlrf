@@ -55,22 +55,16 @@ def parse_args():
 
 def load_model(checkpoint: str, base_model: str, device: str):
     """Load model from checkpoint (handles both full and LoRA checkpoints)."""
-    from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
-    try:
-        from peft import PeftModel
-        processor = AutoProcessor.from_pretrained(checkpoint, trust_remote_code=True)
-        base = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            base_model, torch_dtype=torch.bfloat16,
-            device_map=device, trust_remote_code=True
-        )
-        model = PeftModel.from_pretrained(base, checkpoint)
-    except Exception:
-        logger.info("Loading as full checkpoint (not PeftModel).")
-        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            checkpoint, torch_dtype=torch.bfloat16,
-            device_map=device, trust_remote_code=True
-        )
-        processor = AutoProcessor.from_pretrained(checkpoint, trust_remote_code=True)
+    from rlrf.model.vlm import load_model_and_processor
+    from rlrf.config import ModelConfig
+    from peft import PeftModel
+    
+    print(f"Loading base model {base_model} in 4-bit...")
+    cfg = ModelConfig(model_name=base_model, load_in_4bit=True)
+    base, processor = load_model_and_processor(cfg, device_map=device)
+    
+    print(f"Applying LoRA weights from {checkpoint}...")
+    model = PeftModel.from_pretrained(base, checkpoint)
     model.eval()
     return model, processor
 
