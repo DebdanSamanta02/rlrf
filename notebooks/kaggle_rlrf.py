@@ -433,7 +433,8 @@ def load_and_infer(image_index=0):
     # 4. Setup renderer & grab a sample image
     renderer = SVGRenderer()
     ds = load_dataset(cfg.data.dataset_name, split=cfg.data.dataset_split)
-    sample_image = ds[image_index]["image"].convert("RGB")
+    svg_code = ds[image_index].get("Svg") or ds[image_index].get("svg")
+    sample_image = renderer.render_pil(svg_code).convert("RGB")
     
     # 5. Run Best-of-N inference!
     print("Running inference (Best of 5)... this will take a moment.")
