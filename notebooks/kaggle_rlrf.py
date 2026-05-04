@@ -407,6 +407,13 @@ def load_and_infer(image_index=0):
     from rlrf.rendering import SVGRenderer
     from peft import PeftModel
     from datasets import load_dataset
+    import gc
+    import torch
+    
+    # 0. Completely clear GPU memory from any previous training runs
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     
     # 1. Find the latest saved checkpoint
     ckpts = glob.glob(cfg.rlrf.output_dir + "/step_*")
