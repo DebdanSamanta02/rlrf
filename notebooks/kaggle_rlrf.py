@@ -400,9 +400,8 @@ print("  MSE (↓), SSIM (↑), DINO Score (↑), LPIPS (↓), Code Efficiency (
 # ============================================================================
 
 def load_and_infer(image_index=0):
-    """Load the latest saved checkpoint from disk and test it!"""
+    """Load the latest saved checkpoint and return reference + predicted SVG codes."""
     import os
-    import sys
     import glob
     import importlib
     import gc
@@ -411,67 +410,80 @@ def load_and_infer(image_index=0):
     from datasets import load_dataset
     from PIL import Image as PILImage
     
-    # 0. Completely clear GPU memory from any previous training runs
+    # 0. Clear GPU memory
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     
-    # Force-reload rendering module so git-pull fixes take effect
+    # Force-reload rendering module
     import rlrf.rendering.renderer as _rmod
     importlib.reload(_rmod)
     from rlrf.rendering.renderer import SVGRenderer
-    
     from rlrf.model.vlm import load_model_and_processor
+    from rlrf.data import make_im2svg_messages
     
-    # 1. Find the latest saved checkpoint
+    # 1. Find latest checkpoint
     ckpts = glob.glob(cfg.rlrf.output_dir + "/step_*")
     if not ckpts:
-        print(f"No checkpoints found in {cfg.rlrf.output_dir}! Did it reach Step 10?")
-        return
-        
+        print(f"No checkpoints found in {cfg.rlrf.output_dir}!")
+        return None, None
     latest_ckpt = max(ckpts, key=os.path.getmtime)
-    print(f"Loading latest checkpoint: {latest_ckpt}")
+    print(f"Loading checkpoint: {latest_ckpt}")
     
-    # 2. Load 4-bit base model & processor
+    # 2. Load model
     base_model, processor = load_model_and_processor(cfg.model, cfg.device_map)
-    
-    # 3. Apply the RLRF LoRA weights you just trained!
     model = PeftModel.from_pretrained(base_model, latest_ckpt)
     
-    # 4. Setup renderer & grab a sample image
-    renderer = SVGRenderer()
+    # 3. Get reference SVG from dataset
     ds = load_dataset(cfg.data.dataset_name, split=cfg.data.dataset_split)
     ref_svg = ds[image_index].get("Svg") or ds[image_index].get("svg") or ""
     
-    # Debug: print reference SVG
     print("\n" + "="*60)
-    print("REFERENCE SVG (first 500 chars):")
+    print("REFERENCE SVG:")
     print("="*60)
-    print(ref_svg[:500] if ref_svg else "(EMPTY — no SVG found in dataset!)")
+    print(ref_svg[:1000])
     print("="*60)
     
+    # 4. Render reference to feed to the model
+    renderer = SVGRenderer()
     sample_image = renderer.render_pil(ref_svg).convert("RGB")
     ref_arr = np.array(sample_image)
-    print(f"Reference image stats: shape={ref_arr.shape}, min={ref_arr.min()}, max={ref_arr.max()}, mean={ref_arr.mean():.1f}")
+    print(f"\nRef image stats: shape={ref_arr.shape}, min={ref_arr.min()}, max={ref_arr.max()}, mean={ref_arr.mean():.1f}")
     
-    # 5. Run Best-of-N inference!
-    print("\nRunning inference (Best of 5)... this will take a moment.")
-    svg, pred_arr = inference_demo(model, processor, renderer, sample_image, best_of_n=5)
+    # 5. Generate ONE prediction (skip best-of-N to be faster)
+    messages = make_im2svg_messages(sample_image)
+    text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    inputs = processor(text=[text], images=[sample_image], return_tensors="pt")
+    inputs = {k: v.to("cuda") for k, v in inputs.items()}
     
-    # Debug: print predicted SVG
+    with torch.no_grad():
+        out = model.generate(
+            **inputs,
+            max_new_tokens=512,
+            do_sample=True,
+            temperature=0.5,
+            top_p=0.9,
+            pad_token_id=processor.tokenizer.pad_token_id,
+            eos_token_id=processor.tokenizer.eos_token_id,
+        )
+    pred_svg = processor.tokenizer.decode(
+        out[0, inputs["input_ids"].shape[1]:], skip_special_tokens=True
+    )
+    
     print("\n" + "="*60)
-    print("PREDICTED SVG (first 500 chars):")
+    print("PREDICTED SVG:")
     print("="*60)
-    print(svg[:500] if svg else "(EMPTY — model generated no SVG!)")
+    print(pred_svg[:1000])
     print("="*60)
-    print(f"Predicted image stats: shape={pred_arr.shape}, min={pred_arr.min()}, max={pred_arr.max()}, mean={pred_arr.mean():.1f}")
     
-    step_num = latest_ckpt.split('_')[-1]
-    show_comparison(sample_image, pred_arr, title=f"RLRF (Step {step_num})")
+    # 6. Render and show comparison
+    pred_arr = renderer.render(pred_svg)
+    print(f"\nPred image stats: shape={pred_arr.shape}, min={pred_arr.min()}, max={pred_arr.max()}, mean={pred_arr.mean():.1f}")
     
-    # Return SVGs so user can inspect them
-    return ref_svg, svg
+    show_comparison(sample_image, pred_arr, title=f"RLRF (Step {latest_ckpt.split('_')[-1]})")
+    
+    return ref_svg, pred_svg
 
 print("Added load_and_infer() helper function!")
-# Uncomment to test the first image in the dataset:
-# load_and_infer(image_index=0)
+print("Usage: ref_svg, pred_svg = load_and_infer(image_index=0)")
+
