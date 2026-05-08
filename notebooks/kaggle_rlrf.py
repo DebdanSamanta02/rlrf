@@ -402,18 +402,26 @@ print("  MSE (↓), SSIM (↑), DINO Score (↑), LPIPS (↓), Code Efficiency (
 def load_and_infer(image_index=0):
     """Load the latest saved checkpoint from disk and test it!"""
     import os
+    import sys
     import glob
-    from rlrf.model.vlm import load_model_and_processor
-    from rlrf.rendering import SVGRenderer
-    from peft import PeftModel
-    from datasets import load_dataset
+    import importlib
     import gc
     import torch
+    from peft import PeftModel
+    from datasets import load_dataset
+    from PIL import Image as PILImage
     
     # 0. Completely clear GPU memory from any previous training runs
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    
+    # Force-reload rendering module so git-pull fixes take effect
+    import rlrf.rendering.renderer as _rmod
+    importlib.reload(_rmod)
+    from rlrf.rendering.renderer import SVGRenderer
+    
+    from rlrf.model.vlm import load_model_and_processor
     
     # 1. Find the latest saved checkpoint
     ckpts = glob.glob(cfg.rlrf.output_dir + "/step_*")
@@ -433,15 +441,36 @@ def load_and_infer(image_index=0):
     # 4. Setup renderer & grab a sample image
     renderer = SVGRenderer()
     ds = load_dataset(cfg.data.dataset_name, split=cfg.data.dataset_split)
-    svg_code = ds[image_index].get("Svg") or ds[image_index].get("svg")
-    sample_image = renderer.render_pil(svg_code).convert("RGB")
+    ref_svg = ds[image_index].get("Svg") or ds[image_index].get("svg") or ""
+    
+    # Debug: print reference SVG
+    print("\n" + "="*60)
+    print("REFERENCE SVG (first 500 chars):")
+    print("="*60)
+    print(ref_svg[:500] if ref_svg else "(EMPTY — no SVG found in dataset!)")
+    print("="*60)
+    
+    sample_image = renderer.render_pil(ref_svg).convert("RGB")
+    ref_arr = np.array(sample_image)
+    print(f"Reference image stats: shape={ref_arr.shape}, min={ref_arr.min()}, max={ref_arr.max()}, mean={ref_arr.mean():.1f}")
     
     # 5. Run Best-of-N inference!
-    print("Running inference (Best of 5)... this will take a moment.")
+    print("\nRunning inference (Best of 5)... this will take a moment.")
     svg, pred_arr = inference_demo(model, processor, renderer, sample_image, best_of_n=5)
+    
+    # Debug: print predicted SVG
+    print("\n" + "="*60)
+    print("PREDICTED SVG (first 500 chars):")
+    print("="*60)
+    print(svg[:500] if svg else "(EMPTY — model generated no SVG!)")
+    print("="*60)
+    print(f"Predicted image stats: shape={pred_arr.shape}, min={pred_arr.min()}, max={pred_arr.max()}, mean={pred_arr.mean():.1f}")
     
     step_num = latest_ckpt.split('_')[-1]
     show_comparison(sample_image, pred_arr, title=f"RLRF (Step {step_num})")
+    
+    # Return SVGs so user can inspect them
+    return ref_svg, svg
 
 print("Added load_and_infer() helper function!")
 # Uncomment to test the first image in the dataset:
