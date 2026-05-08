@@ -130,8 +130,11 @@ class SVGRenderer:
                 output_width=self.size,
                 output_height=self.size,
             )
-            img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
-            return np.array(img, dtype=np.uint8)
+            # Composite onto white background to avoid transparent -> black conversion
+            img = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+            bg = Image.new("RGBA", img.size, "WHITE")
+            bg.alpha_composite(img)
+            return np.array(bg.convert("RGB"), dtype=np.uint8)
         except Exception as exc:
             logger.debug("SVG render failed (%s). Returning blank.", exc)
             return _blank_image(self.size)
