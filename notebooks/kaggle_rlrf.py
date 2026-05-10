@@ -399,8 +399,8 @@ print("  MSE (↓), SSIM (↑), DINO Score (↑), LPIPS (↓), Code Efficiency (
 # CELL 9 — Load Latest Checkpoint & Run Inference
 # ============================================================================
 
-def load_and_infer(image_index=0):
-    """Load the latest saved checkpoint and return reference + predicted SVG codes."""
+def load_and_infer(checkpoint_dir, image_index=0):
+    """Load the latest saved checkpoint from a directory and return reference + predicted SVG codes."""
     import os
     import glob
     import importlib
@@ -422,13 +422,19 @@ def load_and_infer(image_index=0):
     from rlrf.model.vlm import load_model_and_processor
     from rlrf.data import make_im2svg_messages
     
-    # 1. Find latest checkpoint
-    ckpts = glob.glob(cfg.rlrf.output_dir + "/step_*")
-    if not ckpts:
-        print(f"No checkpoints found in {cfg.rlrf.output_dir}!")
+    # 1. Find latest checkpoint (if directory contains steps, pick the latest)
+    ckpts = glob.glob(os.path.join(checkpoint_dir, "step_*"))
+    if ckpts:
+        latest_ckpt = max(ckpts, key=os.path.getmtime)
+    else:
+        # Fallback in case the directory itself IS the checkpoint
+        latest_ckpt = checkpoint_dir
+        
+    if not os.path.exists(latest_ckpt):
+        print(f"No checkpoint found at {latest_ckpt}!")
         return None, None
-    latest_ckpt = max(ckpts, key=os.path.getmtime)
-    print(f"Loading checkpoint: {latest_ckpt}")
+        
+    print(f"\n[{checkpoint_dir.upper()}] Loading checkpoint: {latest_ckpt}")
     
     # 2. Load model
     base_model, processor = load_model_and_processor(cfg.model, cfg.device_map)
@@ -471,7 +477,7 @@ def load_and_infer(image_index=0):
     )
     
     print("\n" + "="*60)
-    print("PREDICTED SVG:")
+    print(f"[{checkpoint_dir.upper()}] PREDICTED SVG:")
     print("="*60)
     print(pred_svg[:1000])
     print("="*60)
@@ -480,10 +486,12 @@ def load_and_infer(image_index=0):
     pred_arr = renderer.render(pred_svg)
     print(f"\nPred image stats: shape={pred_arr.shape}, min={pred_arr.min()}, max={pred_arr.max()}, mean={pred_arr.mean():.1f}")
     
-    show_comparison(sample_image, pred_arr, title=f"RLRF (Step {latest_ckpt.split('_')[-1]})")
+    show_comparison(sample_image, pred_arr, title=f"Prediction from {os.path.basename(latest_ckpt)}")
     
     return ref_svg, pred_svg
 
 print("Added load_and_infer() helper function!")
-print("Usage: ref_svg, pred_svg = load_and_infer(image_index=0)")
+print("Usage:")
+print("  ref, pred = load_and_infer(cfg.sft.output_dir, image_index=0)")
+print("  ref, pred = load_and_infer(cfg.rlrf.output_dir, image_index=0)")
 
