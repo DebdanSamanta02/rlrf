@@ -45,10 +45,19 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 def _strip_text_elements(svg_string: str) -> str:
-    """Remove <text> and <tspan> nodes (Text2SVG reward-hack guardrail, §5)."""
+    """Remove <text>, <tspan>, and <image> nodes (guardrails, §5).
+    
+    Stripping <image> is critical to prevent the model from "reward hacking"
+    by embedding base64 raster images instead of drawing vectors!
+    """
     svg_string = re.sub(r"<text[^>]*>.*?</text>", "", svg_string,
                         flags=re.DOTALL | re.IGNORECASE)
     svg_string = re.sub(r"<tspan[^>]*>.*?</tspan>", "", svg_string,
+                        flags=re.DOTALL | re.IGNORECASE)
+    # Strip <image ... /> or <image ...>...</image> tags
+    svg_string = re.sub(r"<image[^>]*>.*?</image>", "", svg_string,
+                        flags=re.DOTALL | re.IGNORECASE)
+    svg_string = re.sub(r"<image[^>]*/>", "", svg_string,
                         flags=re.DOTALL | re.IGNORECASE)
     return svg_string
 
