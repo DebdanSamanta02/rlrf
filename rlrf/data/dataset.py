@@ -269,6 +269,34 @@ class SVGDataset(Dataset):
         Qwen2.5-VL uses <|im_start|>assistant as the delimiter.
         We scan for this pattern to mask prompt tokens from the SFT loss.
         """
+        # We need to find the token sequence for "<|im_start|>assistant\n"
+        # The easiest and most robust way is to convert input_ids to list and search
+        # for the <|im_start|> token, then check if the next token is 'assistant'
+        
+        # Qwen's <|im_start|> is usually 151644
+        # But we can just decode incrementally or find the boundary
+        ids = input_ids.tolist()
+        
+        # We know the prompt ends right before the assistant's content.
+        # A robust way is to decode prefixes until we see the assistant content start,
+        # but that's slow.
+        # Let's search for the `<|im_start|>assistant\n` sequence directly.
+        # Since tokenization of `assistant\n` might vary, let's find the LAST `<|im_start|>` token.
+        # In a standard single-turn prompt, the last <|im_start|> is the assistant's start!
+        im_start_token = self.processor.tokenizer.convert_tokens_to_ids("<|im_start|>")
+        
+        last_im_start_idx = -1
+        for i, token_id in enumerate(ids):
+            if token_id == im_start_token:
+                last_im_start_idx = i
+                
+        if last_im_start_idx != -1:
+            # The assistant response starts a couple of tokens after <|im_start|>
+            # Usually <|im_start|>, `assistant`, `\n`
+            # Let's say +3 tokens. To be safe and not cut off the target SVG,
+            # we'll use last_im_start_idx + 3. 
+            return min(len(ids) - 1, last_im_start_idx + 3)
+            
         # Fallback: use 75% of sequence as prompt heuristic
         return max(0, int(len(input_ids) * 0.75))
 
