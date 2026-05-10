@@ -52,7 +52,13 @@ class LengthReward(RewardFn):
         Returns:
             float in [−1, 1].
         """
-        if not svg_pred or gt_length <= 0:
+        if not svg_pred or "<svg" not in svg_pred.lower():
+            # HEAVY PENALTY if the model generates an empty string or invalid syntax!
+            # This prevents "mode collapse to silence" where the model prefers to output
+            # nothing to avoid the length penalty associated with outputting long garbage.
+            return -10.0
+
+        if gt_length <= 0:
             return 0.0
 
         l_pred = len(svg_pred) if self.use_char_count else len(svg_pred.split())
