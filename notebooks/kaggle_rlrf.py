@@ -440,9 +440,30 @@ def load_and_infer(checkpoint_dir, image_index=0):
     base_model, processor = load_model_and_processor(cfg.model, cfg.device_map)
     model = PeftModel.from_pretrained(base_model, latest_ckpt)
     
-    # 3. Get reference SVG from dataset
-    ds = load_dataset(cfg.data.dataset_name, split=cfg.data.dataset_split)
-    ref_svg = ds[image_index].get("Svg") or ds[image_index].get("svg") or ""
+    # 3. Get reference SVG from curated dataset
+    # We use curate_dataset to ensure we evaluate on a sample that is
+    # actually complex enough to be in the training set (e.g. >= 2000 chars)
+    from rlrf.data.dataset import load_hf_dataset
+    from rlrf.data.curation import curate_dataset
+    
+    raw = load_hf_dataset(
+        cfg.data.dataset_name,
+        split=cfg.data.dataset_split,
+        cache_dir="/kaggle/working/.cache",
+        max_samples=cfg.data.max_train_samples * 5,
+    )
+    curated = curate_dataset(
+        raw,
+        min_tokens=cfg.data.min_gt_tokens,
+        max_samples=cfg.data.max_train_samples,
+        skip_entropy=True,
+    )
+    
+    if image_index >= len(curated):
+        print(f"Index {image_index} out of bounds for curated dataset (size {len(curated)})")
+        image_index = 0
+        
+    ref_svg = curated[image_index].get("svg") or ""
     
     print("\n" + "="*60)
     print("REFERENCE SVG:")

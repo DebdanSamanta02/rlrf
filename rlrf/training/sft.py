@@ -47,7 +47,8 @@ class SVGDataCollator:
     and labels with −100 (ignored by cross-entropy loss).
     """
 
-    def __init__(self, pad_token_id: int = 0) -> None:
+    def __init__(self, pad_token_id: int = 151643) -> None:
+        # Default to 151643 (Qwen2.5-VL <|endoftext|>) to avoid corrupting attention
         self.pad_token_id = pad_token_id
 
     def __call__(self, batch: list[dict]) -> dict:
@@ -149,8 +150,9 @@ def run_sft(cfg: Config, resume_from: Optional[str] = None) -> None:
     )
 
     # ── Trainer ───────────────────────────────────────────────────────────
+    # Use 151643 if pad_token_id is None, NEVER 0.
     collator = SVGDataCollator(
-        pad_token_id=processor.tokenizer.pad_token_id or 0
+        pad_token_id=processor.tokenizer.pad_token_id or 151643
     )
 
     trainer = Trainer(

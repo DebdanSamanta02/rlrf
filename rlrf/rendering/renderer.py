@@ -145,7 +145,7 @@ class SVGRenderer:
             bg.alpha_composite(img)
             return np.array(bg.convert("RGB"), dtype=np.uint8)
         except Exception as exc:
-            logger.debug("SVG render failed (%s). Returning blank.", exc)
+            logger.error("SVG render failed: %s. Returning blank.", exc)
             return _blank_image(self.size)
 
     def render_pil(self, svg_string: str) -> Image.Image:
