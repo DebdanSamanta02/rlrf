@@ -110,13 +110,13 @@ cfg = Config(
         load_in_4bit=True,
         lora_r=16,
         lora_alpha=32,
-        max_seq_length=2048,          # reduce for T4 VRAM
+        max_seq_length=4096,          # must be large enough for image tokens + SVG target
         render_size=224,
     ),
     data=DataConfig(
         dataset_name="starvector/svg-stack",
         dataset_split="train",
-        min_gt_tokens=500,            # paper threshold
+        min_gt_tokens=2000,           # paper: 500 tokens; we filter by char count (ratio ~4:1)
         max_train_samples=500,        # scale down for quick Kaggle experiment
         max_test_samples=50,
     ),
@@ -451,8 +451,11 @@ def load_and_infer(checkpoint_dir, image_index=0):
     print("="*60)
     
     # 4. Render reference to feed to the model
-    renderer = SVGRenderer()
-    sample_image = renderer.render_pil(ref_svg).convert("RGB")
+    # IMPORTANT: enforce_viewbox=False for GT SVGs! We want to preserve the
+    # SVG's native viewBox. enforce_viewbox=True is only for model predictions
+    # (to prevent reward hacking).
+    ref_renderer = SVGRenderer(enforce_viewbox=False)
+    sample_image = ref_renderer.render_pil(ref_svg).convert("RGB")
     ref_arr = np.array(sample_image)
     print(f"\nRef image stats: shape={ref_arr.shape}, min={ref_arr.min()}, max={ref_arr.max()}, mean={ref_arr.mean():.1f}")
     
@@ -482,8 +485,9 @@ def load_and_infer(checkpoint_dir, image_index=0):
     print(pred_svg[:1000])
     print("="*60)
     
-    # 6. Render and show comparison
-    pred_arr = renderer.render(pred_svg)
+    # 6. Render prediction (enforce_viewbox=True to match reward evaluation)
+    pred_renderer = SVGRenderer(enforce_viewbox=True)
+    pred_arr = pred_renderer.render(pred_svg)
     print(f"\nPred image stats: shape={pred_arr.shape}, min={pred_arr.min()}, max={pred_arr.max()}, mean={pred_arr.mean():.1f}")
     
     show_comparison(sample_image, pred_arr, title=f"Prediction from {os.path.basename(latest_ckpt)}")

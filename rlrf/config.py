@@ -40,7 +40,7 @@ class ModelConfig:
 
     # Maximum context length.
     # Paper uses 32k (supports 128k but limited for memory).
-    max_seq_length: int = 4096   # Reduced for Kaggle; paper: 32768
+    max_seq_length: int = 4096   # Must fit image tokens (~1500) + SVG target
 
     # Render resolution (pixels). Paper: 224×224 or adaptive.
     render_size: int = 224
@@ -60,7 +60,10 @@ class DataConfig:
 
     # High-entropy filtering threshold (§4.1):
     # Only keep samples whose ground-truth SVG has ≥ 500 tokens.
-    min_gt_tokens: int = 500
+    # NOTE: When no tokenizer is passed, filter_by_length uses character
+    # count as a proxy. Token-to-char ratio for SVG is ~4:1, so set to
+    # 2000 chars ≈ 500 tokens.
+    min_gt_tokens: int = 2000
 
     # Maximum number of RLRF training samples (paper uses 20k;
     # reduce for Kaggle experimentation).

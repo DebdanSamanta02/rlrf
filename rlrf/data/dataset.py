@@ -165,7 +165,12 @@ class SVGDataset(Dataset):
                 output_width=size,
                 output_height=size,
             )
-            return Image.open(io.BytesIO(png)).convert("RGB")
+            # Composite RGBA onto white to avoid transparent→black conversion
+            # (same fix as renderer.py — CairoSVG produces RGBA PNGs)
+            img = Image.open(io.BytesIO(png)).convert("RGBA")
+            bg = Image.new("RGBA", img.size, "WHITE")
+            bg.alpha_composite(img)
+            return bg.convert("RGB")
         except Exception:
             return Image.new("RGB", (size, size), (255, 255, 255))
 
@@ -191,6 +196,11 @@ class SVGDataset(Dataset):
 
         The SVG is appended to the message as the assistant's response.
         Loss is computed only on the SVG tokens (labels masking).
+
+        IMPORTANT: We do NOT truncate here. If the sequence exceeds
+        max_seq_length, we return None and __getitem__ will skip it.
+        Previous code used truncation=True which silently deleted the
+        SVG target — the #1 cause of blank outputs.
         """
         # Add assistant response to messages
         full_messages = messages + [
@@ -203,27 +213,51 @@ class SVGDataset(Dataset):
             add_generation_prompt=False,
         )
 
-        # Process with image
+        # Process with image — NO truncation! We'd rather skip long
+        # samples than silently destroy the SVG target.
         inputs = self.processor(
             text=[text],
             images=[image],
             return_tensors="pt",
-            max_length=self.max_seq_length,
-            truncation=True,
             padding=False,
         )
 
         # Squeeze batch dimension from processor output
         item = {k: v.squeeze(0) for k, v in inputs.items()}
 
-        # Mask prompt tokens from loss (only compute loss on SVG tokens)
         input_ids = item["input_ids"]
-        labels    = input_ids.clone()
+
+        # If the sequence is too long, truncate from the END but warn.
+        # This loses SVG tokens, so we only keep the sample if at least
+        # 50 SVG tokens survive after truncation.
+        if input_ids.shape[0] > self.max_seq_length:
+            logger.debug(
+                "Sequence too long (%d > %d), truncating.",
+                input_ids.shape[0], self.max_seq_length,
+            )
+            for key in ["input_ids", "attention_mask"]:
+                if key in item:
+                    item[key] = item[key][:self.max_seq_length]
+            input_ids = item["input_ids"]
+
+        # Mask prompt tokens from loss (only compute loss on SVG tokens)
+        labels = input_ids.clone()
 
         # Find where the assistant response starts
-        assistant_token = self._find_assistant_start(input_ids)
-        if assistant_token > 0:
-            labels[:assistant_token] = -100   # ignore prompt in loss
+        assistant_start = self._find_assistant_start(input_ids)
+        num_svg_tokens = len(input_ids) - assistant_start
+
+        if assistant_start > 0 and num_svg_tokens > 20:
+            labels[:assistant_start] = -100   # ignore prompt in loss
+        else:
+            # Not enough SVG tokens survived — mask everything so this
+            # sample contributes zero loss (effectively skipped).
+            logger.warning(
+                "Sample has only %d SVG tokens (assistant_start=%d, total=%d). "
+                "Masking entire sample.",
+                num_svg_tokens, assistant_start, len(input_ids),
+            )
+            labels[:] = -100
 
         item["labels"]    = labels
         item["gt_length"] = gt_len
@@ -263,42 +297,50 @@ class SVGDataset(Dataset):
         item["gt_length"] = gt_len
         return item
 
-    def _find_assistant_start(self, input_ids: torch.Tensor) -> int:
-        """Find the token index where the assistant response begins.
+    # Qwen2.5-VL special token IDs (hardcoded for robustness)
+    _IM_START_TOKEN_ID = 151644   # <|im_start|>
+    _ASSISTANT_TOKEN_ID = 77091   # 'assistant'
+    _NEWLINE_TOKEN_ID = 198       # '\n'
 
-        Qwen2.5-VL uses <|im_start|>assistant as the delimiter.
-        We scan for this pattern to mask prompt tokens from the SFT loss.
+    def _find_assistant_start(self, input_ids: torch.Tensor) -> int:
+        """Find the token index where the assistant SVG content begins.
+
+        Qwen2.5-VL uses <|im_start|>assistant\n as the delimiter.
+        The sequence is: [151644, 77091, 198, <svg tokens...>]
+
+        We find the LAST occurrence of 151644 (the assistant's <|im_start|>)
+        and return the index of the first SVG content token (+3).
         """
-        # We need to find the token sequence for "<|im_start|>assistant\n"
-        # The easiest and most robust way is to convert input_ids to list and search
-        # for the <|im_start|> token, then check if the next token is 'assistant'
-        
-        # Qwen's <|im_start|> is usually 151644
-        # But we can just decode incrementally or find the boundary
         ids = input_ids.tolist()
-        
-        # We know the prompt ends right before the assistant's content.
-        # A robust way is to decode prefixes until we see the assistant content start,
-        # but that's slow.
-        # Let's search for the `<|im_start|>assistant\n` sequence directly.
-        # Since tokenization of `assistant\n` might vary, let's find the LAST `<|im_start|>` token.
-        # In a standard single-turn prompt, the last <|im_start|> is the assistant's start!
-        im_start_token = self.processor.tokenizer.convert_tokens_to_ids("<|im_start|>")
-        
+
+        # Try to get the token ID from the tokenizer first, fall back to hardcoded
+        try:
+            im_start_id = self.processor.tokenizer.convert_tokens_to_ids("<|im_start|>")
+        except (AttributeError, KeyError):
+            im_start_id = self._IM_START_TOKEN_ID
+
+        # Find the LAST <|im_start|> — that's the assistant turn
         last_im_start_idx = -1
         for i, token_id in enumerate(ids):
-            if token_id == im_start_token:
+            if token_id == im_start_id:
                 last_im_start_idx = i
-                
+
         if last_im_start_idx != -1:
-            # The assistant response starts a couple of tokens after <|im_start|>
-            # Usually <|im_start|>, `assistant`, `\n`
-            # Let's say +3 tokens. To be safe and not cut off the target SVG,
-            # we'll use last_im_start_idx + 3. 
-            return min(len(ids) - 1, last_im_start_idx + 3)
-            
-        # Fallback: use 75% of sequence as prompt heuristic
-        return max(0, int(len(input_ids) * 0.75))
+            # Skip: <|im_start|> (1) + assistant (1) + \n (1) = +3
+            content_start = last_im_start_idx + 3
+            # Sanity: don't go past the end
+            return min(content_start, len(ids))
+
+        # Absolute last resort: scan for known assistant token ID
+        for i, token_id in enumerate(ids):
+            if token_id == self._ASSISTANT_TOKEN_ID:
+                return min(i + 2, len(ids))  # skip 'assistant' + '\n'
+
+        logger.warning(
+            "Could not find assistant start token in sequence of length %d. "
+            "Masking will be unreliable.", len(ids)
+        )
+        return len(ids)  # mask everything — don't train on garbage
 
 
 # ---------------------------------------------------------------------------
@@ -402,16 +444,22 @@ def collate_fn_rlrf(batch: list[dict]) -> dict:
     """
     import torch.nn.functional as F
 
-    tensor_keys = ["input_ids", "attention_mask"]
+    # Qwen2.5-VL pad_token_id = 151643 (<|endoftext|>)
+    # Using 0 corrupts attention because 0 is a real vocabulary token.
+    PAD_TOKEN_ID = 151643
+
     result: dict = {}
 
-    # Pad tensors
-    for key in tensor_keys:
+    # Pad tensors with correct pad values
+    pad_values = {
+        "input_ids": PAD_TOKEN_ID,
+        "attention_mask": 0,
+    }
+    for key, pad_val in pad_values.items():
         if key not in batch[0]:
             continue
         seqs = [item[key] for item in batch]
         max_len = max(s.shape[0] for s in seqs)
-        pad_val = 0  # 0 = pad_token_id for attention_mask; will be overridden below
         padded = torch.stack([
             F.pad(s, (0, max_len - s.shape[0]), value=pad_val)
             for s in seqs
