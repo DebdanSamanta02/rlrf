@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 try:
     import cairosvg
     _CAIROSVG_AVAILABLE = True
-except ImportError:
+except Exception:
     _CAIROSVG_AVAILABLE = False
     logger.warning(
         "cairosvg not installed. SVG rendering will return blank images. "

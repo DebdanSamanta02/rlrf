@@ -38,7 +38,7 @@ from torch.utils.data import Dataset
 try:
     import cairosvg as _cairosvg
     _CAIROSVG_OK = True
-except ImportError:
+except Exception:
     _CAIROSVG_OK = False
 
 logger = logging.getLogger(__name__)
